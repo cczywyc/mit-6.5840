@@ -1,17 +1,46 @@
 package mr
 
-import "log"
+import (
+	"log"
+	"sync"
+	"time"
+)
 import "net"
 import "os"
 import "net/rpc"
 import "net/http"
 
-type Coordinator struct {
-	// Your definitions here.
+type TaskState int
+type TaskType int
 
+const (
+	IDLE = iota
+	PROGRESS
+	COMPLETED
+)
+const (
+	MAP = iota
+	REDUCE
+)
+
+type Coordinator struct {
+	idleTaskQueue       Queue
+	inProgressTaskQueue Queue
+	completedTaskQueue  Queue
 }
 
-type TaskState struct {
+type Task struct {
+	t        TaskType  // the task type, map or reduce
+	state    TaskState // the task state
+	number   int       // the worker number, use file name
+	filePath string    // the task output file
+	fileSize int64     // the output file size
+	time     time.Time // the task start time
+}
+
+type Queue struct {
+	tasks []*Task
+	mutex sync.Mutex
 }
 
 // Your code here -- RPC handlers for the worker to call.
