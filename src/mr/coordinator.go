@@ -1,6 +1,7 @@
 package mr
 
 import (
+	"errors"
 	"log"
 	"sync"
 	"time"
@@ -10,37 +11,70 @@ import "os"
 import "net/rpc"
 import "net/http"
 
-type TaskState int
 type TaskType int
 
 const (
-	IDLE = iota
-	PROGRESS
-	COMPLETED
+	UnknownTask TaskType = iota
+	MapTask
+	ReduceTask
 )
+
+type TaskStatus int
+
 const (
-	MAP = iota
-	REDUCE
+	Waiting TaskStatus = iota
+	Running
+	Done
 )
 
 type Coordinator struct {
-	idleTaskQueue       Queue
-	inProgressTaskQueue Queue
-	completedTaskQueue  Queue
+	waitingTaskQueue Queue
+	runningTaskQueue Queue
+	doneTaskQueue    Queue
+
+	mapTotal    int
+	reduceTotal int
 }
 
 type Task struct {
-	t        TaskType  // the task type, map or reduce
-	state    TaskState // the task state
-	number   int       // the worker number, use file name
-	filePath string    // the task output file
-	fileSize int64     // the output file size
-	time     time.Time // the task start time
+	id           int        // the work number, use file name
+	taskType     TaskType   // the task type, map or reduce
+	status       TaskStatus // the task state
+	mapTempFiles []string   // the map task create the temp output file
+	time         time.Time  // the task start time
+	reduceTotal  int
 }
 
 type Queue struct {
-	tasks []*Task
+	tasks []Task
 	mutex sync.Mutex
+}
+
+func (q *Queue) Push(task Task) {
+	q.mutex.Lock()
+	q.tasks = append(q.tasks, task)
+	q.mutex.Unlock()
+}
+
+func (q *Queue) Pop() (Task, error) {
+	q.mutex.Lock()
+	if q.Empty() {
+		q.mutex.Unlock()
+		return Task{}, errors.New("queue is empty")
+	}
+	taskSize := q.Size()
+	task := q.tasks[taskSize-1]
+	q.tasks = q.tasks[:taskSize-1]
+	q.mutex.Unlock()
+	return task, nil
+}
+
+func (q *Queue) Size() int {
+	return len(q.tasks)
+}
+
+func (q *Queue) Empty() bool {
+	return len(q.tasks) == 0
 }
 
 // Your code here -- RPC handlers for the worker to call.
@@ -81,7 +115,12 @@ func (c *Coordinator) Done() bool {
 // main/mrcoordinator.go calls this function.
 // nReduce is the number of reduce tasks to use.
 func MakeCoordinator(files []string, nReduce int) *Coordinator {
-	c := Coordinator{}
+	c := Coordinator{
+		mapTotal:    len(files),
+		reduceTotal: nReduce,
+	}
+
+	// int the waitingQueue
 
 	// Your code here.
 
