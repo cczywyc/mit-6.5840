@@ -3,20 +3,21 @@ package mr
 import (
 	"errors"
 	"log"
+	"net"
+	"net/http"
+	"net/rpc"
+	"os"
 	"sync"
 	"time"
 )
-import "net"
-import "os"
-import "net/rpc"
-import "net/http"
 
 type TaskType int
 
 const (
-	UnknownTask TaskType = iota
-	MapTask
-	ReduceTask
+	_          TaskType = iota // unknown type
+	MapTask                    // map task
+	ReduceTask                 // reduce task
+	AllTaskDone
 )
 
 type TaskStatus int
@@ -32,17 +33,16 @@ type Coordinator struct {
 	runningTaskQueue Queue
 	doneTaskQueue    Queue
 
-	mapTotal    int
-	reduceTotal int
+	nMap    int // the total number of map tasks
+	nReduce int // the total number of reduce tasks
 }
 
 type Task struct {
-	id           int        // the work number, use file name
+	id           int        // the map task or reduce task id
 	taskType     TaskType   // the task type, map or reduce
 	status       TaskStatus // the task state
 	mapTempFiles []string   // the map task create the temp output file
-	time         time.Time  // the task start time
-	reduceTotal  int
+	time         time.Time  // the task startTime
 }
 
 type Queue struct {
@@ -82,10 +82,10 @@ func (q *Queue) Empty() bool {
 // an example RPC handler.
 //
 // the RPC argument and reply types are defined in rpc.go.
-func (c *Coordinator) Example(args *ExampleArgs, reply *ExampleReply) error {
-	reply.Y = args.X + 1
-	return nil
-}
+//func (c *Coordinator) Example(args *ExampleArgs, reply *ExampleReply) error {
+//	reply.Y = args.X + 1
+//	return nil
+//}
 
 // start a thread that listens for RPCs from worker.go
 func (c *Coordinator) server() {
@@ -116,13 +116,18 @@ func (c *Coordinator) Done() bool {
 // nReduce is the number of reduce tasks to use.
 func MakeCoordinator(files []string, nReduce int) *Coordinator {
 	c := Coordinator{
-		mapTotal:    len(files),
-		reduceTotal: nReduce,
+		nMap:    len(files),
+		nReduce: nReduce,
 	}
-
-	// int the waitingQueue
-
-	// Your code here.
+	// init the waiting queue
+	for i := 0; i < len(files); i++ {
+		task := Task{
+			id:       i + 1,
+			taskType: MapTask,
+			status:   Waiting,
+		}
+		c.waitingTaskQueue.Push(task)
+	}
 
 	c.server()
 	return &c
