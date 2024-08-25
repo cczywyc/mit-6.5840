@@ -13,6 +13,7 @@ import (
 
 // GetTaskArgs is the rpc request when the workers ask for task from master
 type GetTaskArgs struct {
+	WorkerName string // the worker name
 }
 
 // GetTaskReply is the rpc response when the workers ask for task from master
@@ -22,6 +23,7 @@ type GetTaskReply struct {
 
 // TaskDoneArgs is the rpc request when the workers finish the task
 type TaskDoneArgs struct {
+	task *Task
 }
 
 // TaskDoneReply is the rpc response when the workers finish the task

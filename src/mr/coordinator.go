@@ -1,6 +1,7 @@
 package mr
 
 import (
+	"fmt"
 	"log"
 	"net"
 	"net/http"
@@ -35,46 +36,77 @@ const (
 
 type Task struct {
 	Id       int        // the map task or reduce task id
-	WorkId   string     // the worker name
+	WorkName string     // the worker name
 	TaskType TaskType   // the task type, map or reduce
 	Status   TaskStatus // the task state
-	Input    []string   // task input files
-	Output   []string   // task output files
+	Input    []string   // task input files, map task is only one input file
+	Output   []string   // task output files, reduce task is only one output file
 	Time     time.Time  // the task startTime
 }
 
-type baseInfo struct {
-	nReduce     int // the total number of reduce tasks
-	mapTasks    []*Task
-	reduceTasks []*Task
-	workers     map[string]*workInfo
+type BaseInfo struct {
+	nReduce   int // the total number of reduce tasks
+	taskMap   map[TaskType][]*Task
+	workerMap map[string]*WorkInfo
 }
 
-type workInfo struct {
-	id             string
+type WorkInfo struct {
+	name           string
 	lastOnlineTime time.Time
 }
 
 type Coordinator struct {
-	phase    *Phase
-	baseInfo *baseInfo
+	phase    Phase
+	baseInfo *BaseInfo
 
 	mutex sync.Mutex
 }
 
 // getTaskHandler is the RPC handler for the workers to get tasks
 func (c *Coordinator) getTaskHandler(args *GetTaskArgs, reply *GetTaskReply) error {
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
+
+	fmt.Printf("[Info]: Coordinator receive the getTask request, args: %v \n", args)
+	workInfo := &WorkInfo{
+		name:           args.WorkerName,
+		lastOnlineTime: time.Now(),
+	}
+	c.baseInfo.workerMap[args.WorkerName] = workInfo
+
+	var task *Task
+	switch c.phase {
+	case MapPhase:
+		task = getTask(c.baseInfo.taskMap[MapTask])
+	case ReducePhase:
+		task = getTask(c.baseInfo.taskMap[ReduceTask])
+	case Done:
+		task = &Task{TaskType: 2}
+	default:
+	}
+
+	// build the reply
+	if task != nil {
+		task.WorkName = args.WorkerName
+		task.Time = time.Now()
+	}
+	reply.task = task
 	return nil
 }
 
 // taskDoneHandler is the RPC handler for theo workers to finish the task
 func (c *Coordinator) taskDoneHandler(args *TaskDoneArgs, reply *TaskDoneReply) error {
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
+
+	fmt.Printf("[Info]: Coordinator receive the task done request, args: %v \n", args)
+
 	return nil
 }
 
-// getTask gets the unfinished task
-func getTask(mapTasks []*Task) (*Task, error) {
-	return nil, nil
+// getTask gets the available task, include the wait tasks or failed tasks
+func getTask(tasks []*Task) *Task {
+	return nil
 }
 
 // start a thread that listens for RPCs from worker.go
@@ -91,8 +123,7 @@ func (c *Coordinator) server() {
 	go http.Serve(l, nil)
 }
 
-// main/mrcoordinator.go calls Done() periodically to find out
-// if the entire job has finished.
+// Done return true if the entire job has finished.
 func (c *Coordinator) Done() bool {
 	ret := false
 
@@ -101,11 +132,31 @@ func (c *Coordinator) Done() bool {
 	return ret
 }
 
-// create a Coordinator.
-// main/mrcoordinator.go calls this function.
-// nReduce is the number of reduce tasks to use.
+// MakeCoordinator return coordinator, init the map tasks
 func MakeCoordinator(files []string, nReduce int) *Coordinator {
-	c := Coordinator{}
+	var mapTasks []*Task
+	for i, file := range files {
+		task := &Task{
+			Id:       i + 1,
+			TaskType: MapTask,
+			Status:   Waiting,
+			Input:    []string{file},
+			Output:   []string{},
+		}
+		mapTasks = append(mapTasks, task)
+	}
+
+	taskMap := make(map[TaskType][]*Task)
+	taskMap[MapTask] = mapTasks
+	baseInfo := &BaseInfo{
+		nReduce:   nReduce,
+		taskMap:   taskMap,
+		workerMap: map[string]*WorkInfo{},
+	}
+	c := Coordinator{
+		phase:    MapPhase,
+		baseInfo: baseInfo,
+	}
 
 	c.server()
 	return &c
