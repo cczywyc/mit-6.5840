@@ -11,16 +11,21 @@ import (
 // remember to capitalize all names.
 //
 
-// Args is the rpc request argument
-type Args struct {
+// GetTaskArgs is the rpc request when the workers ask for task from master
+type GetTaskArgs struct {
 }
 
-// Reply is the rpc request response
-type Reply struct {
-	ID      int // the map or reduce task id
-	Type    TaskType
-	File    string // the input file
-	NReduce int    // the total number of reduce tasks
+// GetTaskReply is the rpc response when the workers ask for task from master
+type GetTaskReply struct {
+	task *Task
+}
+
+// TaskDoneArgs is the rpc request when the workers finish the task
+type TaskDoneArgs struct {
+}
+
+// TaskDoneReply is the rpc response when the workers finish the task
+type TaskDoneReply struct {
 }
 
 // Cook up a unique-ish UNIX-domain socket name

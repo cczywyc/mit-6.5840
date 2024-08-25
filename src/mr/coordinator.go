@@ -1,7 +1,6 @@
 package mr
 
 import (
-	"errors"
 	"log"
 	"net"
 	"net/http"
@@ -11,13 +10,19 @@ import (
 	"time"
 )
 
+type Phase int
+
+const (
+	MapPhase Phase = iota
+	ReducePhase
+	Done
+)
+
 type TaskType int
 
 const (
-	_          TaskType = iota // unknown type
-	MapTask                    // map task
-	ReduceTask                 // reduce task
-	AllTaskDone
+	MapTask    TaskType = iota
+	ReduceTask          // reduce task
 )
 
 type TaskStatus int
@@ -25,67 +30,52 @@ type TaskStatus int
 const (
 	Waiting TaskStatus = iota
 	Running
-	Done
+	Finished
 )
 
-type Coordinator struct {
-	waitingTaskQueue Queue
-	runningTaskQueue Queue
-	doneTaskQueue    Queue
-
-	nMap    int // the total number of map tasks
-	nReduce int // the total number of reduce tasks
-}
-
 type Task struct {
-	id           int        // the map task or reduce task id
-	taskType     TaskType   // the task type, map or reduce
-	status       TaskStatus // the task state
-	mapTempFiles []string   // the map task create the temp output file
-	time         time.Time  // the task startTime
+	Id       int        // the map task or reduce task id
+	WorkId   string     // the worker name
+	TaskType TaskType   // the task type, map or reduce
+	Status   TaskStatus // the task state
+	Input    []string   // task input files
+	Output   []string   // task output files
+	Time     time.Time  // the task startTime
 }
 
-type Queue struct {
-	tasks []Task
+type baseInfo struct {
+	nReduce     int // the total number of reduce tasks
+	mapTasks    []*Task
+	reduceTasks []*Task
+	workers     map[string]*workInfo
+}
+
+type workInfo struct {
+	id             string
+	lastOnlineTime time.Time
+}
+
+type Coordinator struct {
+	phase    *Phase
+	baseInfo *baseInfo
+
 	mutex sync.Mutex
 }
 
-func (q *Queue) Push(task Task) {
-	q.mutex.Lock()
-	q.tasks = append(q.tasks, task)
-	q.mutex.Unlock()
+// getTaskHandler is the RPC handler for the workers to get tasks
+func (c *Coordinator) getTaskHandler(args *GetTaskArgs, reply *GetTaskReply) error {
+	return nil
 }
 
-func (q *Queue) Pop() (Task, error) {
-	q.mutex.Lock()
-	if q.Empty() {
-		q.mutex.Unlock()
-		return Task{}, errors.New("queue is empty")
-	}
-	taskSize := q.Size()
-	task := q.tasks[taskSize-1]
-	q.tasks = q.tasks[:taskSize-1]
-	q.mutex.Unlock()
-	return task, nil
+// taskDoneHandler is the RPC handler for theo workers to finish the task
+func (c *Coordinator) taskDoneHandler(args *TaskDoneArgs, reply *TaskDoneReply) error {
+	return nil
 }
 
-func (q *Queue) Size() int {
-	return len(q.tasks)
+// getTask gets the unfinished task
+func getTask(mapTasks []*Task) (*Task, error) {
+	return nil, nil
 }
-
-func (q *Queue) Empty() bool {
-	return len(q.tasks) == 0
-}
-
-// Your code here -- RPC handlers for the worker to call.
-
-// an example RPC handler.
-//
-// the RPC argument and reply types are defined in rpc.go.
-//func (c *Coordinator) Example(args *ExampleArgs, reply *ExampleReply) error {
-//	reply.Y = args.X + 1
-//	return nil
-//}
 
 // start a thread that listens for RPCs from worker.go
 func (c *Coordinator) server() {
@@ -115,19 +105,7 @@ func (c *Coordinator) Done() bool {
 // main/mrcoordinator.go calls this function.
 // nReduce is the number of reduce tasks to use.
 func MakeCoordinator(files []string, nReduce int) *Coordinator {
-	c := Coordinator{
-		nMap:    len(files),
-		nReduce: nReduce,
-	}
-	// init the waiting queue
-	for i := 0; i < len(files); i++ {
-		task := Task{
-			id:       i + 1,
-			taskType: MapTask,
-			status:   Waiting,
-		}
-		c.waitingTaskQueue.Push(task)
-	}
+	c := Coordinator{}
 
 	c.server()
 	return &c

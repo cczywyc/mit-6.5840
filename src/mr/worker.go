@@ -26,40 +26,8 @@ func Worker(mapf func(string, string) []KeyValue, reducef func(string, []string)
 
 	// send the RPC to the coordinator for asking the task in a loop
 	for {
-		task := callTaskAsking()
-		switch task.Type {
-		case MapTask:
-		case ReduceTask:
-		case AllTaskDone:
-			goto workExit
-		default:
-			fmt.Println("Unknown task type!")
-		}
 
-	workExit:
-		break
 	}
-}
-
-func callTaskAsking() *Reply {
-	args := Args{}
-	reply := Reply{}
-	ok := call("Coordinator.TaskAsking", &args, &reply)
-	if !ok {
-		fmt.Printf("call coordinator for asking task failed!\n")
-		return nil
-	}
-	return &reply
-}
-
-func doMap(task *Reply) error {
-	// todo: doMap implementation
-	return nil
-}
-
-func doReduce(task *Reply) error {
-	// todo: doReduce implementation
-	return nil
 }
 
 // send an RPC request to the coordinator, wait for the response.
