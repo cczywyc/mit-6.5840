@@ -41,7 +41,7 @@ type Task struct {
 	Status   TaskStatus // the task state
 	Input    []string   // task input files, map task is only one input file
 	Output   []string   // task output files, reduce task is only one output file
-	Time     time.Time  // the task startTime
+	Time     time.Time  // the task start time
 }
 
 type BaseInfo struct {
@@ -58,8 +58,8 @@ type WorkInfo struct {
 type Coordinator struct {
 	phase    Phase
 	baseInfo *BaseInfo
-
-	mutex sync.Mutex
+	timer    chan struct{}
+	mutex    sync.Mutex
 }
 
 // getTaskHandler is the RPC handler for the workers to get tasks
@@ -68,11 +68,14 @@ func (c *Coordinator) getTaskHandler(args *GetTaskArgs, reply *GetTaskReply) err
 	defer c.mutex.Unlock()
 
 	fmt.Printf("[Info]: Coordinator receive the getTask request, args: %v \n", args)
-	workInfo := &WorkInfo{
-		name:           args.WorkerName,
-		lastOnlineTime: time.Now(),
+	if c.baseInfo.workerMap[args.WorkerName] == nil {
+		c.baseInfo.workerMap[args.WorkerName] = &WorkInfo{
+			name:           args.WorkerName,
+			lastOnlineTime: time.Now(),
+		}
+	} else {
+		c.baseInfo.workerMap[args.WorkerName].lastOnlineTime = time.Now()
 	}
-	c.baseInfo.workerMap[args.WorkerName] = workInfo
 
 	var task *Task
 	switch c.phase {
@@ -81,8 +84,12 @@ func (c *Coordinator) getTaskHandler(args *GetTaskArgs, reply *GetTaskReply) err
 	case ReducePhase:
 		task = getTask(c.baseInfo.taskMap[ReduceTask])
 	case Done:
+		// worker exit
 		task = &Task{TaskType: 2}
+		// close the timer
+		close(c.timer)
 	default:
+		fmt.Printf("[Error]: Coordinator unknown phase: %v \n", c.phase)
 	}
 
 	// build the reply
@@ -90,7 +97,7 @@ func (c *Coordinator) getTaskHandler(args *GetTaskArgs, reply *GetTaskReply) err
 		task.WorkName = args.WorkerName
 		task.Time = time.Now()
 	}
-	reply.task = task
+	reply.Task = task
 	return nil
 }
 
@@ -100,16 +107,48 @@ func (c *Coordinator) taskDoneHandler(args *TaskDoneArgs, reply *TaskDoneReply) 
 	defer c.mutex.Unlock()
 
 	fmt.Printf("[Info]: Coordinator receive the task done request, args: %v \n", args)
+	c.baseInfo.workerMap[args.WorkerName].lastOnlineTime = time.Now()
+
+	task := args.Task
+	switch task.TaskType {
+	case MapTask:
+		task.Status = Finished
+		if !checkTask(c.baseInfo.taskMap[MapTask]) {
+			fmt.Printf("[Info]: All map tasks have benn finished, the reduce phase begins")
+			c.phase = ReducePhase
+		}
+	case ReduceTask:
+		task.Status = Finished
+		if !checkTask(c.baseInfo.taskMap[ReduceTask]) {
+			fmt.Printf("[Info]: All reduce tasks have benn finished, the done phase begins")
+			c.phase = Done
+		}
+	}
 
 	return nil
 }
 
 // getTask gets the available task, include the wait tasks or failed tasks
 func getTask(tasks []*Task) *Task {
+	for _, task := range tasks {
+		if task.Status == Waiting {
+			return task
+		}
+	}
 	return nil
 }
 
-// start a thread that listens for RPCs from worker.go
+// checkTask check if there are any unfinished tasks. False indicates that all tasks have benn finished
+func checkTask(tasks []*Task) bool {
+	for _, task := range tasks {
+		if task.Status != Finished {
+			return true
+		}
+	}
+	return false
+}
+
+// server start a thread that listens for RPCs from worker.go
 func (c *Coordinator) server() {
 	rpc.Register(c)
 	rpc.HandleHTTP()
@@ -126,9 +165,11 @@ func (c *Coordinator) server() {
 // Done return true if the entire job has finished.
 func (c *Coordinator) Done() bool {
 	ret := false
-
-	// Your code here.
-
+	if c.phase == Done {
+		// wait for 10s and return after both the worker and the timer exit
+		time.Sleep(10 * time.Second)
+		ret = true
+	}
 	return ret
 }
 
@@ -151,11 +192,12 @@ func MakeCoordinator(files []string, nReduce int) *Coordinator {
 	baseInfo := &BaseInfo{
 		nReduce:   nReduce,
 		taskMap:   taskMap,
-		workerMap: map[string]*WorkInfo{},
+		workerMap: make(map[string]*WorkInfo),
 	}
 	c := Coordinator{
 		phase:    MapPhase,
 		baseInfo: baseInfo,
+		timer:    make(chan struct{}),
 	}
 
 	c.server()

@@ -22,8 +22,8 @@ type KeyValue struct {
 	Value string
 }
 
-// use ihash(key) % NReduce to choose the reduce
-// task number for each KeyValue emitted by Map.
+// ihash uses the hash algorithm to assign the same key to the same reduce task,
+// these same keys are written to a temporary file with the same reduce number.
 func ihash(key string) int {
 	h := fnv.New32a()
 	h.Write([]byte(key))
@@ -41,24 +41,24 @@ func Worker(mapf func(string, string) []KeyValue, reducef func(string, []string)
 	// send the RPC to the coordinator for asking the task in a loop
 	for {
 		reply := callGetTask(w.name)
-		if reply.task == nil {
+		if reply.Task == nil {
 			// can not get the task, wait the map or reduce tasks finished
 			time.Sleep(2 * time.Second)
 		}
 
 		fmt.Printf("[Info]: Worker: Receive the task: %v \n", reply)
 		var err error
-		switch reply.task.TaskType {
+		switch reply.Task.TaskType {
 		case MapTask:
-			err = w.doReduce(reply.task)
+			err = w.doReduce(reply.Task)
 		case ReduceTask:
-			err = w.doMap(reply.task)
+			err = w.doMap(reply.Task)
 		default:
 			// worker exit
 			return
 		}
 		if err == nil {
-			callTaskDone(reply.task)
+			callTaskDone(reply.Task)
 		}
 	}
 }
@@ -80,7 +80,7 @@ func callGetTask(workName string) *GetTaskReply {
 func callTaskDone(task *Task) {
 	task.Status = Finished
 	args := TaskDoneArgs{
-		task: task,
+		Task: task,
 	}
 	reply := TaskDoneReply{}
 	ok := call("Coordinator.TaskDone", &args, &reply)
@@ -97,9 +97,8 @@ func (w *WorkerS) doReduce(reply *Task) error {
 	return nil
 }
 
-// send an RPC request to the coordinator, wait for the response.
-// usually returns true.
-// returns false if something goes wrong.
+// call send an RPC request to the coordinator, wait for the response.
+// usually returns true, returns false if something goes wrong.
 func call(rpcname string, args interface{}, reply interface{}) bool {
 	// c, err := rpc.DialHTTP("tcp", "127.0.0.1"+":1234")
 	sockname := coordinatorSock()
