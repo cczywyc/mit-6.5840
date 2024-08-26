@@ -2,12 +2,13 @@ package mr
 
 import (
 	"errors"
-	"fmt"
 	"log"
 	"net"
 	"net/http"
 	"net/rpc"
 	"os"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 )
@@ -67,7 +68,7 @@ func (c *Coordinator) getTaskHandler(args *GetTaskArgs, reply *GetTaskReply) err
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
 
-	fmt.Printf("[Info]: Coordinator receive the getTask request, args: %v \n", args)
+	log.Printf("[Info]: Coordinator receive the getTask request, args: %v \n", args)
 	if c.baseInfo.workerMap[args.WorkerName] == nil {
 		c.baseInfo.workerMap[args.WorkerName] = &WorkInfo{
 			name:           args.WorkerName,
@@ -83,7 +84,7 @@ func (c *Coordinator) getTaskHandler(args *GetTaskArgs, reply *GetTaskReply) err
 		if task != nil {
 			task.WorkName = args.WorkerName
 			task.Status = Running
-			fmt.Printf("[Info]: Assign the map task number: %d to worker: %s \n", task.Id, args.WorkerName)
+			log.Printf("[Info]: Assign the map task number: %d to worker: %s \n", task.Id, args.WorkerName)
 		}
 		reply.Task = task
 	case ReducePhase:
@@ -91,7 +92,7 @@ func (c *Coordinator) getTaskHandler(args *GetTaskArgs, reply *GetTaskReply) err
 		if task != nil {
 			task.WorkName = args.WorkerName
 			task.Status = Running
-			fmt.Printf("[Info]: Assign the reduce task number: %d to worker: %s \n", task.Id, args.WorkerName)
+			log.Printf("[Info]: Assign the reduce task number: %d to worker: %s \n", task.Id, args.WorkerName)
 		}
 		reply.Task = task
 	case Done:
@@ -101,7 +102,7 @@ func (c *Coordinator) getTaskHandler(args *GetTaskArgs, reply *GetTaskReply) err
 		// close the timer
 		close(c.timer)
 	default:
-		fmt.Printf("[Error]: Coordinator unknown phase: %v \n", c.phase)
+		log.Printf("[Error]: Coordinator unknown phase: %v \n", c.phase)
 		return errors.New("coordinator unknown phase")
 	}
 
@@ -113,7 +114,7 @@ func (c *Coordinator) taskDoneHandler(args *TaskDoneArgs, reply *TaskDoneReply) 
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
 
-	fmt.Printf("[Info]: Coordinator receive the task done request, args: %v \n", args)
+	log.Printf("[Info]: Coordinator receive the task done request, args: %v \n", args)
 	c.baseInfo.workerMap[args.WorkerName].lastOnlineTime = time.Now()
 
 	task := args.Task
@@ -121,13 +122,36 @@ func (c *Coordinator) taskDoneHandler(args *TaskDoneArgs, reply *TaskDoneReply) 
 	case MapTask:
 		task.Status = Finished
 		if !checkTask(c.baseInfo.taskMap[MapTask]) {
-			fmt.Printf("[Info]: All map tasks have benn finished, the reduce phase begins")
+			log.Printf("[Info]: All map tasks have benn finished, the reduce phase begins")
+
+			reduceInputMap := make(map[int][]string)
+			for _, mapTask := range c.baseInfo.taskMap[MapTask] {
+				for _, fileName := range mapTask.Output {
+					split := strings.Split(fileName, "-")
+					idxReduce, _ := strconv.Atoi(split[2])
+					reduceInputMap[idxReduce] = append(reduceInputMap[idxReduce], fileName)
+				}
+			}
+			// init the reduce tasks
+			var reduceTasks []*Task
+			for i := range c.baseInfo.nReduce {
+				task := &Task{
+					Id:       i,
+					TaskType: ReduceTask,
+					Status:   Waiting,
+					Input:    reduceInputMap[i],
+					Output:   []string{},
+				}
+				reduceTasks = append(reduceTasks, task)
+			}
+			c.baseInfo.taskMap[ReduceTask] = reduceTasks
+
 			c.phase = ReducePhase
 		}
 	case ReduceTask:
 		task.Status = Finished
 		if !checkTask(c.baseInfo.taskMap[ReduceTask]) {
-			fmt.Printf("[Info]: All reduce tasks have benn finished, the done phase begins")
+			log.Printf("[Info]: All reduce tasks have benn finished, the done phase begins")
 			c.phase = Done
 		}
 	}
@@ -164,7 +188,7 @@ func (c *Coordinator) workerTimer() {
 		for range ticker.C {
 			select {
 			case <-c.timer:
-				fmt.Printf("[Info]: Worker timer exit. \n]")
+				log.Printf("[Info]: Worker timer exit. \n]")
 				return
 			default:
 				c.mutex.Lock()
@@ -238,9 +262,11 @@ func (c *Coordinator) Done() bool {
 // MakeCoordinator return coordinator, init the map tasks
 func MakeCoordinator(files []string, nReduce int) *Coordinator {
 	var mapTasks []*Task
+
+	// init the map tasks
 	for i, file := range files {
 		task := &Task{
-			Id:       i + 1,
+			Id:       i,
 			TaskType: MapTask,
 			Status:   Waiting,
 			Input:    []string{file},

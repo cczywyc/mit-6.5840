@@ -18,7 +18,8 @@ type GetTaskArgs struct {
 
 // GetTaskReply is the rpc response when the workers ask for task from master
 type GetTaskReply struct {
-	Task *Task
+	NReduce int
+	Task    *Task
 }
 
 // TaskDoneArgs is the rpc request when the workers finish the task

@@ -1,11 +1,14 @@
 package mr
 
 import (
+	"encoding/json"
+	"errors"
 	"fmt"
 	"hash/fnv"
 	"log"
 	"math/rand"
 	"net/rpc"
+	"os"
 	"strconv"
 	"time"
 )
@@ -47,16 +50,16 @@ func Worker(mapf func(string, string) []KeyValue, reducef func(string, []string)
 			time.Sleep(time.Second)
 		}
 
-		fmt.Printf("[Info]: Worker: Receive the task: %v \n", reply)
+		log.Printf("[Info]: Worker: Receive the task: %v \n", reply)
 		var err error
 		switch reply.Task.TaskType {
 		case MapTask:
-			err = w.doReduce(reply.Task)
+			err = w.doMap(reply)
 		case ReduceTask:
-			err = w.doMap(reply.Task)
+			err = w.doReduce(reply)
 		default:
 			// worker exit
-			fmt.Printf("[Info]: Worker name: %s exit.\n", w.name)
+			log.Printf("[Info]: Worker name: %s exit.\n", w.name)
 			return
 		}
 		if err == nil {
@@ -73,7 +76,7 @@ func callGetTask(workName string) *GetTaskReply {
 	reply := GetTaskReply{}
 	ok := call("Coordinator.GetTask", &args, &reply)
 	if !ok {
-		fmt.Printf("[Error]: Coordinator.GetTask failed!\n")
+		log.Printf("[Error]: Coordinator.GetTask failed!\n")
 		return nil
 	}
 	return &reply
@@ -87,15 +90,62 @@ func callTaskDone(task *Task) {
 	reply := TaskDoneReply{}
 	ok := call("Coordinator.TaskDone", &args, &reply)
 	if !ok {
-		fmt.Printf("[Error]: Coordinator.TaskDone failed!\n")
+		log.Printf("[Error]: Coordinator.TaskDone failed!\n")
 	}
 }
 
-func (w *WorkerS) doMap(reply *Task) error {
+// doMap execute the map task
+func (w *WorkerS) doMap(reply *GetTaskReply) error {
+	if len(reply.Task.Input) == 0 {
+		log.Printf("[Error]: task number %d: No input!\n", reply.Task.Id)
+		return errors.New("map task no input")
+	}
+	log.Printf("[Info]: Worker name: %s start execute number: %d map task \n", w.name, reply.Task.Id)
+
+	fileName := reply.Task.Input[0]
+	inputBytes, err := os.ReadFile(fileName)
+	if err != nil {
+		log.Printf("[Error]: read map task input file error: %v \n", err)
+		return err
+	}
+
+	// kv2ReduceMap: key: reduce index, value: key/value list. split the same key into reduce
+	kv2ReduceMap := make(map[int][]KeyValue, reply.NReduce)
+	var output []string
+	outputFileNameFunc := func(idxReduce int) string {
+		return fmt.Sprintf("mr-%d-%d", reply.Task.Id, idxReduce)
+	}
+
+	// call the map function
+	mapResult := w.mapF(fileName, string(inputBytes))
+	for _, kv := range mapResult {
+		idxReduce := ihash(kv.Key) % reply.NReduce
+		kv2ReduceMap[idxReduce] = append(kv2ReduceMap[idxReduce], kv)
+	}
+
+	for idxReduce, kv := range kv2ReduceMap {
+		outputFileName := outputFileNameFunc(idxReduce)
+		outputFile, _ := os.Create(outputFileName)
+		encoder := json.NewEncoder(outputFile)
+		for _, kv := range kv {
+			err := encoder.Encode(kv)
+			if err != nil {
+				log.Printf("[Error]: write map task output file error: %v \n", err)
+				_ = outputFile.Close()
+				break
+			}
+		}
+		_ = outputFile.Close()
+		output = append(output, outputFileName)
+	}
+
+	reply.Task.Output = output
+	log.Printf("[Info]: Worker name: %s finished the map task number: %d \n", w.name, reply.Task.Id)
 	return nil
 }
 
-func (w *WorkerS) doReduce(reply *Task) error {
+// doReduce execute
+func (w *WorkerS) doReduce(reply *GetTaskReply) error {
 	return nil
 }
 
@@ -115,6 +165,6 @@ func call(rpcname string, args interface{}, reply interface{}) bool {
 		return true
 	}
 
-	fmt.Println(err)
+	log.Println(err)
 	return false
 }
