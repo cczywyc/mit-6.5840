@@ -42,8 +42,9 @@ func Worker(mapf func(string, string) []KeyValue, reducef func(string, []string)
 	for {
 		reply := callGetTask(w.name)
 		if reply.Task == nil {
-			// can not get the task, wait the map or reduce tasks finished
-			time.Sleep(2 * time.Second)
+			// can not get the task, maybe all map tasks or all reduce task are running but not be finished
+			// waiting to the next phase
+			time.Sleep(time.Second)
 		}
 
 		fmt.Printf("[Info]: Worker: Receive the task: %v \n", reply)
@@ -55,6 +56,7 @@ func Worker(mapf func(string, string) []KeyValue, reducef func(string, []string)
 			err = w.doMap(reply.Task)
 		default:
 			// worker exit
+			fmt.Printf("[Info]: Worker name: %s exit.\n", w.name)
 			return
 		}
 		if err == nil {

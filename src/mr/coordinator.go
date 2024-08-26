@@ -1,6 +1,7 @@
 package mr
 
 import (
+	"errors"
 	"fmt"
 	"log"
 	"net"
@@ -14,7 +15,7 @@ import (
 type Phase int
 
 const (
-	MapPhase Phase = iota
+	MapPhase Phase = iota + 1
 	ReducePhase
 	Done
 )
@@ -22,14 +23,14 @@ const (
 type TaskType int
 
 const (
-	MapTask    TaskType = iota
+	MapTask    TaskType = iota + 1
 	ReduceTask          // reduce task
 )
 
 type TaskStatus int
 
 const (
-	Waiting TaskStatus = iota
+	Waiting TaskStatus = iota + 1
 	Running
 	Finished
 )
@@ -41,7 +42,6 @@ type Task struct {
 	Status   TaskStatus // the task state
 	Input    []string   // task input files, map task is only one input file
 	Output   []string   // task output files, reduce task is only one output file
-	Time     time.Time  // the task start time
 }
 
 type BaseInfo struct {
@@ -77,27 +77,34 @@ func (c *Coordinator) getTaskHandler(args *GetTaskArgs, reply *GetTaskReply) err
 		c.baseInfo.workerMap[args.WorkerName].lastOnlineTime = time.Now()
 	}
 
-	var task *Task
 	switch c.phase {
 	case MapPhase:
-		task = getTask(c.baseInfo.taskMap[MapTask])
+		task := getTask(c.baseInfo.taskMap[MapTask])
+		if task != nil {
+			task.WorkName = args.WorkerName
+			task.Status = Running
+			fmt.Printf("[Info]: Assign the map task number: %d to worker: %s \n", task.Id, args.WorkerName)
+		}
+		reply.Task = task
 	case ReducePhase:
-		task = getTask(c.baseInfo.taskMap[ReduceTask])
+		task := getTask(c.baseInfo.taskMap[ReduceTask])
+		if task != nil {
+			task.WorkName = args.WorkerName
+			task.Status = Running
+			fmt.Printf("[Info]: Assign the reduce task number: %d to worker: %s \n", task.Id, args.WorkerName)
+		}
+		reply.Task = task
 	case Done:
 		// worker exit
-		task = &Task{TaskType: 2}
+		task := &Task{TaskType: 0}
+		reply.Task = task
 		// close the timer
 		close(c.timer)
 	default:
 		fmt.Printf("[Error]: Coordinator unknown phase: %v \n", c.phase)
+		return errors.New("coordinator unknown phase")
 	}
 
-	// build the reply
-	if task != nil {
-		task.WorkName = args.WorkerName
-		task.Time = time.Now()
-	}
-	reply.Task = task
 	return nil
 }
 
@@ -146,6 +153,61 @@ func checkTask(tasks []*Task) bool {
 		}
 	}
 	return false
+}
+
+// workerTimer create a timer that checks the worker online status every 1 second
+func (c *Coordinator) workerTimer() {
+	go func() {
+		ticker := time.NewTicker(time.Second)
+		defer ticker.Stop()
+
+		for range ticker.C {
+			select {
+			case <-c.timer:
+				fmt.Printf("[Info]: Worker timer exit. \n]")
+				return
+			default:
+				c.mutex.Lock()
+
+				for _, workInfo := range c.baseInfo.workerMap {
+					if time.Now().Sub(workInfo.lastOnlineTime) <= 10 {
+						continue
+					}
+					// According to the MapReduce paper, in a real distributed system,
+					// since the intermediate files output by the Map task are stored on their respective worker nodes,
+					// when the worker is offline and cannot communicate, all map tasks executed by this worker,
+					// whether completed or not, should be reset to the initial state and reallocated to other workers,
+					// while the files output by the reduce task are stored on the global file system (GFS),
+					// and only unfinished tasks need to be reset and reallocated.
+					if c.phase == MapPhase {
+						mapTasks := c.baseInfo.taskMap[MapTask]
+						for _, task := range mapTasks {
+							if task.WorkName == workInfo.name {
+								task.Status = Waiting
+								task.WorkName = ""
+								for _, output := range task.Output {
+									_ = os.Remove(output)
+								}
+								task.Output = []string{}
+							}
+						}
+					} else if c.phase == ReducePhase {
+						reduceTasks := c.baseInfo.taskMap[ReduceTask]
+						for _, task := range reduceTasks {
+							if task.WorkName == workInfo.name && task.Status == Running {
+								task.Status = Waiting
+								task.WorkName = ""
+								_ = os.Remove(task.Output[0])
+								task.Output = []string{}
+							}
+						}
+					}
+					delete(c.baseInfo.workerMap, workInfo.name)
+				}
+				c.mutex.Unlock()
+			}
+		}
+	}()
 }
 
 // server start a thread that listens for RPCs from worker.go
@@ -200,6 +262,9 @@ func MakeCoordinator(files []string, nReduce int) *Coordinator {
 		timer:    make(chan struct{}),
 	}
 
+	// worker online status timer
+	c.workerTimer()
+	// start RPC server
 	c.server()
 	return &c
 }
