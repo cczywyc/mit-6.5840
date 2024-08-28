@@ -209,9 +209,6 @@ func (c *Coordinator) workerTimer() {
 							if task.WorkName == workInfo.name {
 								task.Status = Waiting
 								task.WorkName = ""
-								for _, output := range task.Output {
-									_ = os.Remove(output)
-								}
 								task.Output = []string{}
 							}
 						}
@@ -221,7 +218,6 @@ func (c *Coordinator) workerTimer() {
 							if task.WorkName == workInfo.name && task.Status == Running {
 								task.Status = Waiting
 								task.WorkName = ""
-								_ = os.Remove(task.Output[0])
 								task.Output = []string{}
 							}
 						}

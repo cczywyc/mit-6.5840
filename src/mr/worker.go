@@ -83,7 +83,6 @@ func callGetTask(workName string) *GetTaskReply {
 }
 
 func callTaskDone(task *Task) {
-	task.Status = Finished
 	args := TaskDoneArgs{
 		Task: task,
 	}
@@ -96,13 +95,14 @@ func callTaskDone(task *Task) {
 
 // doMap execute the map task
 func (w *WorkerS) doMap(reply *GetTaskReply) error {
-	if len(reply.Task.Input) == 0 {
-		log.Printf("[Error]: task number %d: No input!\n", reply.Task.Id)
+	task := reply.Task
+	if len(task.Input) == 0 {
+		log.Printf("[Error]: task number %d: No input!\n", task.Id)
 		return errors.New("map task no input")
 	}
-	log.Printf("[Info]: Worker name: %s start execute number: %d map task \n", w.name, reply.Task.Id)
+	log.Printf("[Info]: Worker name: %s start execute number: %d map task \n", w.name, task.Id)
 
-	fileName := reply.Task.Input[0]
+	fileName := task.Input[0]
 	inputBytes, err := os.ReadFile(fileName)
 	if err != nil {
 		log.Printf("[Error]: read map task input file error: %v \n", err)
@@ -113,7 +113,7 @@ func (w *WorkerS) doMap(reply *GetTaskReply) error {
 	kv2ReduceMap := make(map[int][]KeyValue, reply.NReduce)
 	var output []string
 	outputFileNameFunc := func(idxReduce int) string {
-		return fmt.Sprintf("mr-%d-%d", reply.Task.Id, idxReduce)
+		return fmt.Sprintf("mr-%d-%d", task.Id, idxReduce)
 	}
 
 	// call the map function
@@ -123,11 +123,11 @@ func (w *WorkerS) doMap(reply *GetTaskReply) error {
 		kv2ReduceMap[idxReduce] = append(kv2ReduceMap[idxReduce], kv)
 	}
 
-	for idxReduce, kv := range kv2ReduceMap {
+	for idxReduce, kvs := range kv2ReduceMap {
 		outputFileName := outputFileNameFunc(idxReduce)
 		outputFile, _ := os.Create(outputFileName)
 		encoder := json.NewEncoder(outputFile)
-		for _, kv := range kv {
+		for _, kv := range kvs {
 			err := encoder.Encode(kv)
 			if err != nil {
 				log.Printf("[Error]: write map task output file error: %v \n", err)
@@ -139,12 +139,12 @@ func (w *WorkerS) doMap(reply *GetTaskReply) error {
 		output = append(output, outputFileName)
 	}
 
-	reply.Task.Output = output
-	log.Printf("[Info]: Worker name: %s finished the map task number: %d \n", w.name, reply.Task.Id)
+	task.Output = output
+	log.Printf("[Info]: Worker name: %s finished the map task number: %d \n", w.name, task.Id)
 	return nil
 }
 
-// doReduce execute
+// doReduce execute the reduce task
 func (w *WorkerS) doReduce(reply *GetTaskReply) error {
 	return nil
 }
