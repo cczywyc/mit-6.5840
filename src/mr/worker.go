@@ -117,17 +117,17 @@ func (w *WorkerS) doMap(reply *GetTaskReply) error {
 	}
 
 	// call the map function
-	mapResult := w.mapF(fileName, string(inputBytes))
-	for _, kv := range mapResult {
+	kva := w.mapF(fileName, string(inputBytes))
+	for _, kv := range kva {
 		idxReduce := ihash(kv.Key) % reply.NReduce
 		kv2ReduceMap[idxReduce] = append(kv2ReduceMap[idxReduce], kv)
 	}
 
-	for idxReduce, kvs := range kv2ReduceMap {
+	for idxReduce, item := range kv2ReduceMap {
 		outputFileName := outputFileNameFunc(idxReduce)
 		outputFile, _ := os.Create(outputFileName)
 		encoder := json.NewEncoder(outputFile)
-		for _, kv := range kvs {
+		for _, kv := range item {
 			err := encoder.Encode(kv)
 			if err != nil {
 				log.Printf("[Error]: write map task output file error: %v \n", err)
@@ -146,6 +146,22 @@ func (w *WorkerS) doMap(reply *GetTaskReply) error {
 
 // doReduce execute the reduce task
 func (w *WorkerS) doReduce(reply *GetTaskReply) error {
+	task := reply.Task
+	var kva []KeyValue
+	for _, fileName := range task.Input {
+		open, _ := os.Open(fileName)
+		decoder := json.NewDecoder(open)
+		for {
+			var kv KeyValue
+			if err := decoder.Decode(&kv); err != nil {
+				break
+			}
+			kva = append(kva, kv)
+		}
+	}
+
+	// sort
+	log.Printf("[Info]: Worker name: %s finished the reduce task number: %d \n", w.name, task.Id)
 	return nil
 }
 
