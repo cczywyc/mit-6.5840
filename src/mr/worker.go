@@ -9,7 +9,9 @@ import (
 	"math/rand"
 	"net/rpc"
 	"os"
+	"sort"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -17,6 +19,7 @@ type WorkerS struct {
 	name    string
 	mapF    func(string, string) []KeyValue
 	reduceF func(string, []string) string
+	workDir string
 }
 
 // KeyValue is the key/value pire of the map functions
@@ -24,6 +27,13 @@ type KeyValue struct {
 	Key   string
 	Value string
 }
+
+// ByKey is for sorting by key
+type ByKey []KeyValue
+
+func (a ByKey) Len() int           { return len(a) }
+func (a ByKey) Swap(i, j int)      { a[i], a[j] = a[j], a[i] }
+func (a ByKey) Less(i, j int) bool { return a[i].Key < a[j].Key }
 
 // ihash uses the hash algorithm to assign the same key to the same reduce task,
 // these same keys are written to a temporary file with the same reduce number.
@@ -35,10 +45,13 @@ func ihash(key string) int {
 
 // Worker is called by main/mrworker.go
 func Worker(mapf func(string, string) []KeyValue, reducef func(string, []string) string) {
+	// get the current workspace path
+	workDir, _ := os.Getwd()
 	w := WorkerS{
 		name:    "worker_" + strconv.Itoa(rand.Intn(100000)),
 		mapF:    mapf,
 		reduceF: reducef,
+		workDir: workDir,
 	}
 
 	// send the RPC to the coordinator for asking the task in a loop
@@ -147,7 +160,7 @@ func (w *WorkerS) doMap(reply *GetTaskReply) error {
 // doReduce execute the reduce task
 func (w *WorkerS) doReduce(reply *GetTaskReply) error {
 	task := reply.Task
-	var kva []KeyValue
+	var kva ByKey
 	for _, fileName := range task.Input {
 		open, _ := os.Open(fileName)
 		decoder := json.NewDecoder(open)
@@ -161,6 +174,33 @@ func (w *WorkerS) doReduce(reply *GetTaskReply) error {
 	}
 
 	// sort
+	sort.Sort(kva)
+
+	// write to a temp file
+	tempFile := fmt.Sprintf("mr-out-%d-temp-", task.Id)
+	oFile, _ := os.CreateTemp(w.workDir, tempFile)
+
+	i := 0
+	for i < len(kva) {
+		j := i + 1
+		for j < len(kva) && kva[j].Key == kva[i].Key {
+			j++
+		}
+		var values []string
+		for k := i; k < j; k++ {
+			values = append(values, kva[k].Value)
+		}
+		result := w.reduceF(kva[i].Key, values)
+		_, _ = fmt.Fprintf(oFile, "%v %v\n", kva[j].Key, result)
+
+		i = j
+	}
+
+	// rename the reduce task output
+	index := strings.Index(oFile.Name(), "-temp")
+	_ = os.Rename(oFile.Name(), oFile.Name()[:index])
+
+	_ = oFile.Close()
 	log.Printf("[Info]: Worker name: %s finished the reduce task number: %d \n", w.name, task.Id)
 	return nil
 }
