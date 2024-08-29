@@ -126,7 +126,7 @@ func (w *WorkerS) doMap(reply *GetTaskReply) error {
 	kv2ReduceMap := make(map[int][]KeyValue, reply.NReduce)
 	var output []string
 	outputFileNameFunc := func(idxReduce int) string {
-		return fmt.Sprintf("mr-%d-%d", task.Id, idxReduce)
+		return fmt.Sprintf("mr-%d-%d-temp-", task.Id, idxReduce)
 	}
 
 	// call the map function
@@ -137,19 +137,22 @@ func (w *WorkerS) doMap(reply *GetTaskReply) error {
 	}
 
 	for idxReduce, item := range kv2ReduceMap {
-		outputFileName := outputFileNameFunc(idxReduce)
-		outputFile, _ := os.Create(outputFileName)
-		encoder := json.NewEncoder(outputFile)
+		// write to the temp file
+		oFile, _ := os.CreateTemp(w.workDir, outputFileNameFunc(idxReduce))
+		encoder := json.NewEncoder(oFile)
 		for _, kv := range item {
 			err := encoder.Encode(kv)
 			if err != nil {
 				log.Printf("[Error]: write map task output file error: %v \n", err)
-				_ = outputFile.Close()
+				_ = oFile.Close()
 				break
 			}
 		}
-		_ = outputFile.Close()
-		output = append(output, outputFileName)
+		// rename
+		index := strings.Index(oFile.Name(), "-temp")
+		_ = os.Rename(oFile.Name(), oFile.Name()[:index])
+		output = append(output, oFile.Name())
+		_ = oFile.Close()
 	}
 
 	task.Output = output
@@ -167,6 +170,8 @@ func (w *WorkerS) doReduce(reply *GetTaskReply) error {
 		for {
 			var kv KeyValue
 			if err := decoder.Decode(&kv); err != nil {
+				log.Printf("[Error]: read reduce task input file error: %v \n", err)
+				_ = open.Close()
 				break
 			}
 			kva = append(kva, kv)
@@ -199,8 +204,9 @@ func (w *WorkerS) doReduce(reply *GetTaskReply) error {
 	// rename the reduce task output
 	index := strings.Index(oFile.Name(), "-temp")
 	_ = os.Rename(oFile.Name(), oFile.Name()[:index])
-
 	_ = oFile.Close()
+
+	task.Output = []string{oFile.Name()}
 	log.Printf("[Info]: Worker name: %s finished the reduce task number: %d \n", w.name, task.Id)
 	return nil
 }
