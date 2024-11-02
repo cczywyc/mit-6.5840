@@ -63,12 +63,12 @@ type Coordinator struct {
 	mutex    sync.Mutex
 }
 
-// getTaskHandler is the RPC handler for the workers to get tasks
-func (c *Coordinator) getTaskHandler(args *GetTaskArgs, reply *GetTaskReply) error {
+// GetTask is the RPC handler for the workers to get tasks
+func (c *Coordinator) GetTask(args *GetTaskArgs, reply *GetTaskReply) error {
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
 
-	log.Printf("[Info]: Coordinator receive the getTask request, args: %v \n", args)
+	log.Printf("[Info]: Coordinator receive the getTask request, args: %v \n", &args)
 	if c.baseInfo.workerMap[args.WorkerName] == nil {
 		c.baseInfo.workerMap[args.WorkerName] = &WorkInfo{
 			name:           args.WorkerName,
@@ -87,6 +87,7 @@ func (c *Coordinator) getTaskHandler(args *GetTaskArgs, reply *GetTaskReply) err
 			log.Printf("[Info]: Assign the map task number: %d to worker: %s \n", task.Id, args.WorkerName)
 		}
 		reply.Task = task
+		reply.NReduce = c.baseInfo.nReduce
 	case ReducePhase:
 		task := getTask(c.baseInfo.taskMap[ReduceTask])
 		if task != nil {
@@ -95,10 +96,12 @@ func (c *Coordinator) getTaskHandler(args *GetTaskArgs, reply *GetTaskReply) err
 			log.Printf("[Info]: Assign the reduce task number: %d to worker: %s \n", task.Id, args.WorkerName)
 		}
 		reply.Task = task
+		reply.NReduce = c.baseInfo.nReduce
 	case Done:
 		// worker exit
 		task := &Task{TaskType: 0}
 		reply.Task = task
+		reply.NReduce = c.baseInfo.nReduce
 		// close the timer
 		close(c.timer)
 	default:
@@ -109,12 +112,12 @@ func (c *Coordinator) getTaskHandler(args *GetTaskArgs, reply *GetTaskReply) err
 	return nil
 }
 
-// taskDoneHandler is the RPC handler for theo workers to finish the task
-func (c *Coordinator) taskDoneHandler(args *TaskDoneArgs, reply *TaskDoneReply) error {
+// TaskDone is the RPC handler for theo workers to finish the task
+func (c *Coordinator) TaskDone(args *TaskDoneArgs, reply *TaskDoneReply) error {
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
 
-	log.Printf("[Info]: Coordinator receive the task done request, args: %v \n", args)
+	log.Printf("[Info]: Coordinator receive the task done request, args: %v \n", &args)
 	c.baseInfo.workerMap[args.WorkerName].lastOnlineTime = time.Now()
 
 	task := args.Task
