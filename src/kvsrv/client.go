@@ -1,9 +1,10 @@
 package kvsrv
 
-import "6.5840/labrpc"
-import "crypto/rand"
-import "math/big"
-
+import (
+	"crypto/rand"
+	"github.com/cczywyc/mit-6.5840/src/labrpc"
+	"math/big"
+)
 
 type Clerk struct {
 	server *labrpc.ClientEnd

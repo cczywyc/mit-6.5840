@@ -1,8 +1,10 @@
 package kvsrv
 
-import "6.5840/labrpc"
-import "testing"
-import "os"
+import (
+	"github.com/cczywyc/mit-6.5840/src/labrpc"
+	"os"
+	"testing"
+)
 
 //import "log"
 import crand "crypto/rand"

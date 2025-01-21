@@ -1,10 +1,9 @@
 package kvsrv
 
 import (
-	"6.5840/models"
-	"6.5840/porcupine"
-
 	"fmt"
+	"github.com/cczywyc/mit-6.5840/src/models"
+	"github.com/cczywyc/mit-6.5840/src/porcupine"
 	"io/ioutil"
 	"log"
 	"math/rand"
