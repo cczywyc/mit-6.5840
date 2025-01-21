@@ -7,13 +7,14 @@ import (
 )
 
 type Clerk struct {
-	server *labrpc.ClientEnd
-	// You will have to modify this struct.
+	server    *labrpc.ClientEnd
+	clientId  int64
+	seqNumber int
 }
 
 func nrand() int64 {
-	max := big.NewInt(int64(1) << 62)
-	bigx, _ := rand.Int(rand.Reader, max)
+	maxI := big.NewInt(int64(1) << 62)
+	bigx, _ := rand.Int(rand.Reader, maxI)
 	x := bigx.Int64()
 	return x
 }
@@ -21,11 +22,12 @@ func nrand() int64 {
 func MakeClerk(server *labrpc.ClientEnd) *Clerk {
 	ck := new(Clerk)
 	ck.server = server
-	// You'll have to add code here.
+	ck.clientId = nrand()
+	ck.seqNumber = 0
 	return ck
 }
 
-// fetch the current value for a key.
+// Get fetch the current value for a key.
 // returns "" if the key does not exist.
 // keeps trying forever in the face of all other errors.
 //
@@ -36,12 +38,23 @@ func MakeClerk(server *labrpc.ClientEnd) *Clerk {
 // must match the declared types of the RPC handler function's
 // arguments. and reply must be passed as a pointer.
 func (ck *Clerk) Get(key string) string {
+	args := GetArgs{
+		Key:       key,
+		ClientId:  ck.clientId,
+		SeqNumber: ck.seqNumber,
+	}
+	reply := GetReply{}
+	ck.seqNumber++
 
-	// You will have to modify this function.
+	// send the Get RPC request
+	ok := ck.server.Call("KVServer.Get", &args, &reply)
+	if ok {
+		return reply.Value
+	}
 	return ""
 }
 
-// shared by Put and Append.
+// PutAppend shared by Put and Append.
 //
 // you can send an RPC with code like this:
 // ok := ck.server.Call("KVServer."+op, &args, &reply)
@@ -50,7 +63,21 @@ func (ck *Clerk) Get(key string) string {
 // must match the declared types of the RPC handler function's
 // arguments. and reply must be passed as a pointer.
 func (ck *Clerk) PutAppend(key string, value string, op string) string {
-	// You will have to modify this function.
+	args := PutAppendArgs{
+		Key:       key,
+		Value:     value,
+		Op:        op,
+		ClientId:  ck.clientId,
+		SeqNumber: ck.seqNumber,
+	}
+	reply := PutAppendReply{}
+	ck.seqNumber++
+
+	// send the RPC request
+	ok := ck.server.Call("KVServer."+op, &args, &reply)
+	if ok {
+		return reply.PreviousValue
+	}
 	return ""
 }
 

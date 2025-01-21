@@ -2,20 +2,22 @@ package kvsrv
 
 // Put or Append
 type PutAppendArgs struct {
-	Key   string
-	Value string
-	// You'll have to add definitions here.
-	// Field names must start with capital letters,
-	// otherwise RPC will break.
+	Key       string
+	Value     string
+	Op        string // Op type, "Put" or "Append"
+	ClientId  int64
+	SeqNumber int
 }
 
+// PutAppendReply : lab introduction: append appends arg to key's value and returns the old value
 type PutAppendReply struct {
-	Value string
+	PreviousValue string
 }
 
 type GetArgs struct {
-	Key string
-	// You'll have to add definitions here.
+	Key       string
+	ClientId  int64
+	SeqNumber int
 }
 
 type GetReply struct {
