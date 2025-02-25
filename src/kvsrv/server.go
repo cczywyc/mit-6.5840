@@ -40,6 +40,7 @@ func (kv *KVServer) Put(args *PutAppendArgs, reply *PutAppendReply) {
 	defer kv.mu.Unlock()
 
 	if args.SeqNumber <= kv.clientSeqs[args.ClientId] {
+		// Repeat the request and return the historical value
 		reply.PreviousValue = kv.store[args.Key]
 		return
 	}
